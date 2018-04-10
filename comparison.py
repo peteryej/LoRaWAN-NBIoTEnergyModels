@@ -16,7 +16,7 @@ print "LoRaWAN energy per bit is %.3f mJ" % lorawanModel.calcEnergyperbit()
 print 'Nb-IoT energy per bit is %.3f mJ' % nbiotModel.calcEnergyperBit()
 
 #T_notif = range(.1, 25*60, 10)
-T_notif = [i*10**exp for exp in range(-1, 3) for i in range(1, 10)]
+T_notif = [i*10**exp for exp in range(-1, 4) for i in range(1, 10)]
 DR0Lifetime = []
 DR5Lifetime = []
 for notifPeriod in T_notif:

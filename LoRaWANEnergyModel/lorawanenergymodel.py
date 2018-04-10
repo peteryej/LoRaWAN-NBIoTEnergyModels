@@ -37,7 +37,17 @@ import config
 class LoRaWANEnergyModel:
 
 	def __init__(self, dr=3, cr=.8, pl=3, t_notif=3600000, p_c=.0001, ackmode=1):
-		assert(dr <= 6 and dr >= 0), "DR values only from 0 to 6 are supported"
+		"""LoRaWANEnergyModel Initialization
+		Args:
+			dr: data rate, only from 0 to 6 are supported
+			cr: coding Rate, 4/5, 4/6, 4/7, 4/8
+			pl: frame payload (bytes), maximum value varies based on DR setting, specified below
+			t_notif: notification period (ms)
+			p_c: collision probability, bigger than 0
+			ackmode: 1 for with acknowledgement, 0 for without acknowledgement mode
+		"""
+		
+		assert(dr <= 6 and dr >= 0), "Only DR values from 0 to 6 are supported"
 		self.DR = dr 		# data rate
 		if self.DR <= 5:
 			self._SF = 12 - self.DR   # valid values are 7,8,9,10,11,12
@@ -45,9 +55,10 @@ class LoRaWANEnergyModel:
 		elif self.DR == 6:
 			self._SF = 7
 			self._BW = 250   # (KHz)
-		self._CR = cr   # 4/5, 4/6, 4/7, 4/8
+		self._CR = cr
 		self._PL = pl   # (bytes) max 242 for SF 7-8, 115 for SF 9, 51 for SF 10-12
 		self._acknowledgement = ackmode # 1 for with acknowledgement, 0 for wihtout ack
+		assert(p_c > 0), "P_c needs to be bigger than 0"
 		self.P_c = p_c  # collision probability
 		self.T_notif = t_notif
 

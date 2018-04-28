@@ -16,6 +16,7 @@ data transmission rate, e.g payload size and transmission interval.
 
 Examples:
 	nbiot = NBIoTEnergyModel(t_notif=10000000)
+	print 'System bandwidth %d MHz' % nbiot.BW_sys
 	print 'Energy per Bit is %.3f mJ' % nbiot.calcEnergyperBit()
 	print 'Total device lifetime is %.3f years' %nbiot.calcLifetime()
 
@@ -33,8 +34,8 @@ class NBIoTEnergyModel:
 	def __init__(self, pl=100, t_notif=1000000, p_c=0, p_e=0):
 
 		self.B_data = pl # (bytes) payload
-		self.B_dataCP = self.B_data+20 # (bytes) RRC UL transfer + NAS control plane SR + Bdata message size for CP
-		self.B_compCP = self.B_dataCP+9 # (bytes) RRC Setup Complete + NAS control plane SR + Bdata message size for CP
+		self.B_dataCP = self.B_data+44#20 # (bytes) RRC UL transfer + NAS control plane SR + Bdata message size for CP
+		self.B_compCP = self.B_dataCP#+9 # (bytes) RRC Setup Complete + NAS control plane SR + Bdata message size for CP
 		# system parameters
 		self.BW_sys = config.BW_sys
 		self.T_RAwin = config.T_RAwin
@@ -148,7 +149,7 @@ class NBIoTEnergyModel:
 		self.E_drop = 0
 
 
-	def calcEnergyperBit(self):
+	def calcEnergyperPacket(self):
 		self.calcStatesEnergy()
 		# calculate average energy per packet
 		E_ave = (self.b_off*self.E_off+self.b_connect*self.E_connect+self.b_drop*self.E_drop+self.b_active*self.E_active+\
@@ -177,13 +178,16 @@ class NBIoTEnergyModel:
 		E_ave += E_CRsum
 		E_ave += E_LCsum
 		E_avePacket = E_ave/self.N_p/1000
-		E_aveBit = E_avePacket/self.B_RBp/8
+		return E_avePacket
+
+
+	def calcEnergyperBit(self):
+		E_avePacket = self.calcEnergyperPacket()
+		E_aveBit = E_avePacket/(self.B_data)/8
 		return E_aveBit
 
-
 	def calcLifetime(self):
-		E_perBit = self.calcEnergyperBit()
+		E_avePacket = self.calcEnergyperPacket()
 		E_total = self._battery*self._voltage
-		numofPackets = math.ceil(float(self.B_compCP)/self.B_RBp)
-		T_total = E_total*3600/(E_perBit*self.B_compCP*8)*self.IAT/3600000/24/365
+		T_total = E_total*3600/E_avePacket*self.IAT/3600000/24/365
 		return T_total

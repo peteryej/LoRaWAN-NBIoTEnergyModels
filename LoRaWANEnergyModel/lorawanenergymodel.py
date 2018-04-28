@@ -16,13 +16,14 @@ Note:
 	LoRaWAN Data Rate setting is EU specific
 
 Examples:
-	lora = LoRaWANEnergyModel(dr=0, ackmode=1, pl=1, p_c=0, t_notif=6000000)
+	lora = LoRaWANEnergyModel(dr=5, ackmode=1, pl=100, p_c=0.00001, t_notif=6000000)
 	print lora._SF
 	print lora._BW
 	print "Expected data delivered is %d bytes" % lora.getdataDelivered()
-	print "Average current is %.3f mA" % lora.calcAveCurrent()
+	print "Average current is %.3f mA" % lora.calcAveCurrentandTime()[0]
 	print "Total device lifetime is %.3f year" % lora.calcLifetime()
-	print "Energy per bit is %.3f mJ" % lora.calcEnergyperbit()
+	print "Energy per bit is %.3f mJ" % lora.calcEnergyperBit()
+	print "One gateway capacity is %d devices" % lora.calcAlohaCapcity()
 
 Peter (Jun) Ye
 """
@@ -36,7 +37,7 @@ import config
 
 class LoRaWANEnergyModel:
 
-	def __init__(self, dr=3, cr=.8, pl=3, t_notif=3600000, p_c=.0001, ackmode=1):
+	def __init__(self, dr=3, cr=1, pl=3, t_notif=3600000, N_dev=1, p_c=0, ackmode=1):
 		"""LoRaWANEnergyModel Initialization
 		Args:
 			dr: data rate, only from 0 to 6 are supported
@@ -46,7 +47,7 @@ class LoRaWANEnergyModel:
 			p_c: collision probability, bigger than 0
 			ackmode: 1 for with acknowledgement, 0 for without acknowledgement mode
 		"""
-		
+
 		assert(dr <= 6 and dr >= 0), "Only DR values from 0 to 6 are supported"
 		self.DR = dr 		# data rate
 		if self.DR <= 5:
@@ -55,10 +56,15 @@ class LoRaWANEnergyModel:
 		elif self.DR == 6:
 			self._SF = 7
 			self._BW = 250   # (KHz)
+		assert(cr<=4 and cr>=1), "Valid values are from 1 to 4, for 4/5,4/6,4/7,4/8"
 		self._CR = cr
 		self._PL = pl   # (bytes) max 242 for SF 7-8, 115 for SF 9, 51 for SF 10-12
 		self._acknowledgement = ackmode # 1 for with acknowledgement, 0 for wihtout ack
-		assert(p_c > 0), "P_c needs to be bigger than 0"
+		if(N_dev != 1):
+			p_c = 1.0- 0.913*math.exp(-.00131*N_dev)
+		#assert(p_c > 0), "P_c needs to be bigger than 0"
+		if p_c > .1*config.numofRetransMax:
+			p_c = .1*config.numofRetransMax
 		self.P_c = p_c  # collision probability
 		self.T_notif = t_notif
 
@@ -91,6 +97,7 @@ class LoRaWANEnergyModel:
 		self.receive_delay1 = config.receive_delay1  # (ms)
 		self.receive_delay2 = config.receive_delay2  # (ms)
 		self.numofPreambleSymbols = config.numofPreambleSymbols
+		self.numof125KHzChannels = config.numof125KHzChannels
 
 		self.T_txMin = {12:991.8, 11:577.5, 10:288.7, 9:144.4, 8:72.2, 7:41.2}
 
@@ -124,7 +131,7 @@ class LoRaWANEnergyModel:
 		self.dataDelivered = self._PL*((1-self.BER)**(self.totalData))*(1-self.P_c)
 
 
-		self.T_trans = self.timeofMessage+self.timeofPreamble  # measured 52 ms
+		self.T_trans = self.timeofMessage+self.timeofPreamble
 		self.T_delay1 = self.receive_delay1
 		self.T_recv1 = self.timeperSymbol*self.numofRecvSymbols # measured 24 ms
 		self.T_delay2 = 1000 - self.T_recv1
@@ -181,15 +188,15 @@ class LoRaWANEnergyModel:
 
 		return I_aveNotif, T_active
 
-	def calcAveCurrent(self):
+	def calcAveCurrentandTime(self):
 		if (self._acknowledgement):
-			I_aveNotif = self.calcAveCurrentAck()
+			I_aveNotif, T_active = self.calcAveCurrentAck()
 		else:
 			I_aveNotif, T_active = self.calcACandAT(ackmode=0)
-		return I_aveNotif
+		return I_aveNotif, T_active
 
 	def calcAveCurrentAck(self):
-		random.seed()
+		#random.seed()
 
 		k = 0  # number of retransmissions
 		numofRetransMax = config.numofRetransMax # default is set as 7
@@ -203,9 +210,14 @@ class LoRaWANEnergyModel:
 
 		P_0 = ((1-self.BER)**totalDataAmt)**((1-self.BER)**totalAckAmt)*(1-self.P_c) # probablility without retransmission
 		P_k = ((1-P_0)**k)*P_0
+		# print "P_0 %f" % P_0
+		# print "P_dataErr %f" % P_dataErr
+		# print "P_1winErr %f" % P_1winErr
+		# print "P_2winErr %f" % P_2winErr
 
 		I_ackTO = self.I_delay1
-		T_ackTO = random.randint(1000,3000)
+
+
 
 		I_aveNotifAck, T_activeAck = self.calcACandAT(ackmode=1)
 		# print I_aveNotifAck, T_activeAck
@@ -214,8 +226,11 @@ class LoRaWANEnergyModel:
 
 		T_ok = T_activeAck
 		I_ok = (I_aveNotifAck*self.T_notif-(self.T_notif-T_ok)*self.I_sleep)/T_ok
+		#print "I_ok %f" % I_ok
+		#I_ok1 = I_aveNotifAck
+		#print "I_ok1 %f" % I_ok1
 
-		I_dataErr = I_aveNotifNoAck
+		I_dataErr = (I_aveNotifNoAck*self.T_notif-(self.T_notif-T_activeNoAck)*self.I_sleep)/T_activeNoAck
 		I_1winErr = (self.I_ack1*self.T_notif-(self.T_notif-T_ok)*self.I_sleep)/T_ok
 		I_2winErr = (self.I_ack2*self.T_notif-(self.T_notif-T_ok)*self.I_sleep)/T_ok
 
@@ -228,12 +243,15 @@ class LoRaWANEnergyModel:
 		I_act = 0
 		Topsumk =0
 		Bottomsumk =0
-		self.dataDelivered = 0
-		for k in range(numofRetransMax):
-			for i in range(k):
-			    Topsumk += (I_ackTO*(T_ackTO-self.T_recv2NoAck)+(I_dataErr*T_dataErr*P_dataErr + I_1winErr*T_1winErr*P_1winErr \
+		P_dataDelivered = 0
+		T_recv2 = self.T_txMin[self._SF]
+		for k in range(numofRetransMax+1):
+			T_ackTO = random.randint(1000,3000)
+			for i in range(k+1):
+			    Topsumk += (I_ackTO*(T_ackTO- T_recv2)+(I_dataErr*T_dataErr*P_dataErr + I_1winErr*T_1winErr*P_1winErr \
 			                                                + I_2winErr*T_2winErr*P_2winErr)/(P_dataErr+P_1winErr+P_2winErr))
-			    Bottomsumk += (T_ackTO-self.T_recv2NoAck)+(T_dataErr*P_dataErr+T_1winErr*P_1winErr+T_2winErr*P_2winErr)/ \
+			for i in range(1, k+1):
+			    Bottomsumk += (T_ackTO-T_recv2)+(T_dataErr*P_dataErr+T_1winErr*P_1winErr+T_2winErr*P_2winErr)/ \
 			                                                (P_dataErr+P_1winErr+P_2winErr)
 
 			P_k = ((1-P_0)**k)*P_0
@@ -241,26 +259,51 @@ class LoRaWANEnergyModel:
 			I_k = (I_ok*T_ok+Topsumk)/T_k
 			I_act += I_k*P_k
 			T_act += T_k*P_k
-			self.dataDelivered += (((1-self.P_c)*(1-(1-self.BER)**self.totalData)+self.P_c)**k)*\
+			P_dataDelivered += (((1-self.P_c)*(1-(1-self.BER)**self.totalData)+self.P_c)**k)*\
 									(1-self.P_c)*(1-self.BER)**self.totalData
 			Topsumk = 0
 			Bottomsumk = 0
+			# print "P_k %f" % P_k
+			# print "I_act: %.4f" % I_act
+			# print "T_ack: %.4f" % T_act
+			# print "I_k: %.4f" % I_k
+			# print "T_k: %.4f" % T_k
 
-		self.dataDelivered += self._PL*self.dataDelivered
+		self.dataDelivered = self._PL*P_dataDelivered
+
 		I_aveAck = (I_act*T_act+self.I_sleep*(self.T_notif-T_act))/self.T_notif
-		return I_aveAck
+
+		return I_aveAck, T_act
 
 	def getdataDelivered(self):
 		if (self._acknowledgement):
 			self.calcAveCurrentAck()
 		return self.dataDelivered
 
-	def calcEnergyperbit(self):
-		I_aveNotif = self.calcAveCurrent()
+	def calcEnergyperBit(self):
+		I_aveNotif,_ = self.calcAveCurrentandTime()
 		E_perBit = I_aveNotif*self._voltage*self.T_notif/self.dataDelivered/1000.0/8.0
 		return E_perBit
 
 	def calcLifetime(self):
-		I_aveNotif = self.calcAveCurrent()
+		I_aveNotif, _ = self.calcAveCurrentandTime()
 		T_lifetime = self._battery/I_aveNotif/24.0/365.0
 		return T_lifetime
+
+	def calcAlohaCapcity(self):
+		#activeTime = (self.calcAveCurrentandTime()[1]-self.T_wakeup-self.T_radioPrep-\
+		#		self.T_radioOff-self.T_postproc-self.T_turnoff)
+		return self.T_notif/self.T_trans*(.5/math.e)*self.numof125KHzChannels
+
+
+"""
+lora = LoRaWANEnergyModel(dr=5, ackmode=1, pl=18, p_c=0, t_notif=60000)
+print lora._SF
+print lora._BW
+print lora.T_trans
+print "Expected data delivered is %d bytes" % lora.getdataDelivered()
+print "Average current is %.3f mA" % lora.calcAveCurrentandTime()[0]
+print "Total device lifetime is %.3f year" % lora.calcLifetime()
+print "Energy per bit is %.3f mJ" % lora.calcEnergyperBit()
+print "One gateway capacity is %d devices" % lora.calcAlohaCapcity()
+"""
